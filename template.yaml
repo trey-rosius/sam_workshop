@@ -1,0 +1,206 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  sam_workshop
+
+  SAM Template for sam_workshop
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 5
+    Runtime: python3.8
+    Tracing: Active
+    Environment:
+      Variables:
+        # Powertools env vars: https://awslabs.github.io/aws-lambda-powertools-python/latest/#environment-variables
+        LOG_LEVEL: INFO
+        POWERTOOLS_LOGGER_SAMPLE_RATE: 0.1
+        POWERTOOLS_LOGGER_LOG_EVENT: true
+        POWERTOOLS_SERVICE_NAME: sam_workshop
+
+Resources:
+  CrudApiFunction:
+    Type: AWS::Serverless::Function
+    DependsOn:
+      - LambdaLoggingPolicy
+    Properties:
+      Handler: app.lambda_handler
+      CodeUri: code/
+      Role: !GetAtt CrudApiRole.Arn
+      Description: Direct Lambda Resolver
+      Tags:
+        SOLUTION: LambdaPowertoolsPython
+
+  ###################
+  # IAM PERMISSIONS AND ROLES
+  ##################
+
+  AppSyncServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "appsync.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+  InvokeLambdaResolverPolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: "DirectAppSyncLambda"
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action: "lambda:invokeFunction"
+            Resource:
+              - !GetAtt CrudApiFunction.Arn
+      Roles:
+        - !Ref AppSyncServiceRole
+  LambdaLoggingPolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: LambdaXRayPolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              [
+                "xray:PutTraceSegments",
+                "xray:PutTelemetryRecords",
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+              ]
+            Resource: "*"
+      Roles:
+        - !Ref CrudApiRole
+  DynamoDBReadPolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: DynamoDBReadPolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action: ["dynamodb:GetItem", "dynamodb:Query"]
+            Resource:
+              - !GetAtt DynamoDBCrudTable.Arn
+      Roles:
+        - !Ref CrudApiRole
+
+  DynamoDBWritePolicy:
+    Type: "AWS::IAM::Policy"
+    Properties:
+      PolicyName: DynamoDBWritePolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action:
+              [
+                "dynamodb:PutItem",
+                "dynamodb:UpdateItem",
+                "dynamodb:ConditionCheckItem",
+                "dynamodb:DeleteItem",
+              ]
+            Resource:
+              - !GetAtt DynamoDBCrudTable.Arn
+
+      Roles:
+        - !Ref CrudApiRole
+
+  CrudApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Action:
+              - "sts:AssumeRole"
+            Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+
+  RoleAppSyncCloudWatch:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - appsync.amazonaws.com
+
+  ###################
+  # GRAPHQL API
+  ##################
+
+  CrudApi:
+    Type: "AWS::AppSync::GraphQLApi"
+    Properties:
+      Name: CrudApi
+      AuthenticationType: "API_KEY"
+      XrayEnabled: true
+      LogConfig:
+        CloudWatchLogsRoleArn: !GetAtt RoleAppSyncCloudWatch.Arn
+        ExcludeVerboseContent: FALSE
+        FieldLogLevel: ALL
+
+  CrudApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId: !GetAtt CrudApi.ApiId
+
+  CrudApiSchema:
+    Type: "AWS::AppSync::GraphQLSchema"
+    Properties:
+      ApiId: !GetAtt CrudApi.ApiId
+      DefinitionS3Location: "schema/schema.graphql"
+
+  ###################
+  # LAMBDA DIRECT DATA SOURCE AND RESOLVER
+  ##################
+
+  CrudFunctionDataSource:
+    Type: "AWS::AppSync::DataSource"
+    Properties:
+      ApiId: !GetAtt CrudApi.ApiId
+      Name: "CrudLambdaDirectResolver"
+      Type: "AWS_LAMBDA"
+      ServiceRoleArn: !GetAtt AppSyncServiceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt CrudApiFunction.Arn
+
+  CreateUserResolver:
+    Type: "AWS::AppSync::Resolver"
+    Properties:
+      ApiId: !GetAtt CrudApi.ApiId
+      TypeName: "Mutation"
+      FieldName: "createUser"
+      DataSourceName: !GetAtt CrudFunctionDataSource.Name
+  ###################
+  # DYNAMODB TABLE
+  ##################
+  DynamoDBCrudTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+

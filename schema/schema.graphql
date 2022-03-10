@@ -1,0 +1,38 @@
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+type Query {
+  getUser(id: ID!): User!
+  getAllUsers: [User!]!
+}
+type Mutation {
+  createUser(user: createUserInput): User!
+  updateUser(input: updateUserInput): User!
+  deleteUser(id: ID!): Boolean
+}
+type User {
+  id: ID!
+  firstName: String!
+  lastName: String!
+  favouriteMeal: String!
+  country: String!
+  village: String!
+  age: Int!
+}
+
+input createUserInput {
+  firstName: String!
+  lastName: String!
+  favouriteMeal: String!
+  country: String!
+  village: String!
+  age: Int!
+}
+input updateUserInput {
+  id: ID!
+  firstName: String
+  lastName: String
+  favouriteMeal: String
+}
