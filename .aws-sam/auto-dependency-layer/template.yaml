@@ -1,0 +1,257 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Sam Workshop Direct Lambda Resolver
+Globals:
+  Function:
+    Timeout: 5
+    Runtime: python3.8
+    Tracing: Active
+    Environment:
+      Variables:
+        TABLE_NAME:
+          Ref: SamWorkshopDDBTable
+        LOG_LEVEL: INFO
+        POWERTOOLS_LOGGER_SAMPLE_RATE: 0.1
+        POWERTOOLS_LOGGER_LOG_EVENT: true
+        POWERTOOLS_SERVICE_NAME: sample_resolver
+Resources:
+  SamWorkshopFunction:
+    Type: AWS::Serverless::Function
+    DependsOn:
+    - LambdaLoggingPolicy
+    Properties:
+      Handler: app.lambda_handler
+      CodeUri: SamWorkshopFunction
+      Role:
+        Fn::GetAtt:
+        - SamWorkshopRole
+        - Arn
+      Description: Lambda Powertools Direct Lambda Resolver
+      Tags:
+        SOLUTION: LambdaPowertoolsPython
+      Layers:
+      - Fn::GetAtt:
+        - AwsSamAutoDependencyLayerNestedStack
+        - Outputs.SamWorkshopFunctionb29b27e6DepLayer
+    Metadata:
+      SamResourceId: SamWorkshopFunction
+  AppSyncServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - appsync.amazonaws.com
+          Action:
+          - sts:AssumeRole
+  InvokeLambdaResolverPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: DirectAppSyncLambda
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action: lambda:invokeFunction
+          Resource:
+          - Fn::GetAtt:
+            - SamWorkshopFunction
+            - Arn
+      Roles:
+      - Ref: AppSyncServiceRole
+  LambdaLoggingPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: LambdaXRayPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - xray:PutTraceSegments
+          - xray:PutTelemetryRecords
+          - logs:CreateLogGroup
+          - logs:CreateLogStream
+          - logs:PutLogEvents
+          Resource: '*'
+      Roles:
+      - Ref: SamWorkshopRole
+  DynamoDBReadPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: DynamoDBReadPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:GetItem
+          - dynamodb:Query
+          Resource:
+          - Fn::GetAtt:
+            - SamWorkshopDDBTable
+            - Arn
+      Roles:
+      - Ref: SamWorkshopRole
+  DynamoDBWritePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: DynamoDBWritePolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - dynamodb:PutItem
+          - dynamodb:UpdateItem
+          - dynamodb:ConditionCheckItem
+          - dynamodb:DeleteItem
+          Resource:
+          - Fn::GetAtt:
+            - SamWorkshopDDBTable
+            - Arn
+      Roles:
+      - Ref: SamWorkshopRole
+  SamWorkshopRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+          - sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service:
+            - lambda.amazonaws.com
+  RoleAppSyncCloudWatch:
+    Type: AWS::IAM::Role
+    Properties:
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSAppSyncPushToCloudWatchLogs
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Action:
+          - sts:AssumeRole
+          Principal:
+            Service:
+            - appsync.amazonaws.com
+  SamWorkshopApi:
+    Type: AWS::AppSync::GraphQLApi
+    Properties:
+      Name: SamWorkshopApi
+      AuthenticationType: API_KEY
+      XrayEnabled: true
+      LogConfig:
+        CloudWatchLogsRoleArn:
+          Fn::GetAtt:
+          - RoleAppSyncCloudWatch
+          - Arn
+        ExcludeVerboseContent: false
+        FieldLogLevel: ALL
+  SamWorkshopApiKey:
+    Type: AWS::AppSync::ApiKey
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - SamWorkshopApi
+        - ApiId
+  SamWorkshopApiSchema:
+    Type: AWS::AppSync::GraphQLSchema
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - SamWorkshopApi
+        - ApiId
+      DefinitionS3Location: ../../schema/schema.graphql
+  SamWorkshopFunctionDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - SamWorkshopApi
+        - ApiId
+      Name: SamWorkshopLambdaDirectResolver
+      Type: AWS_LAMBDA
+      ServiceRoleArn:
+        Fn::GetAtt:
+        - AppSyncServiceRole
+        - Arn
+      LambdaConfig:
+        LambdaFunctionArn:
+          Fn::GetAtt:
+          - SamWorkshopFunction
+          - Arn
+  CreateUserResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - SamWorkshopApi
+        - ApiId
+      TypeName: Mutation
+      FieldName: createUser
+      DataSourceName:
+        Fn::GetAtt:
+        - SamWorkshopFunctionDataSource
+        - Name
+  UpdateUserResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - SamWorkshopApi
+        - ApiId
+      TypeName: Mutation
+      FieldName: updateUser
+      DataSourceName:
+        Fn::GetAtt:
+        - SamWorkshopFunctionDataSource
+        - Name
+  GetUserResolver:
+    Type: AWS::AppSync::Resolver
+    Properties:
+      ApiId:
+        Fn::GetAtt:
+        - SamWorkshopApi
+        - ApiId
+      TypeName: Query
+      FieldName: getUser
+      DataSourceName:
+        Fn::GetAtt:
+        - SamWorkshopFunctionDataSource
+        - Name
+  SamWorkshopDDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: id
+        AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+      - AttributeName: id
+        KeyType: HASH
+  AwsSamAutoDependencyLayerNestedStack:
+    DeletionPolicy: Delete
+    Metadata:
+      CreatedBy: AWS SAM CLI sync command
+    Properties:
+      TemplateURL: /Users/rosius/Documents/sam_workshop/.aws-sam/auto-dependency-layer/nested_template.yaml
+    Type: AWS::CloudFormation::Stack
+Outputs:
+  SamWorkshopFunction:
+    Description: Hello World Lambda Function ARN
+    Value:
+      Fn::GetAtt:
+      - SamWorkshopFunction
+      - Arn
+  SamWorkshopAPI:
+    Value:
+      Fn::GetAtt:
+      - SamWorkshopApi
+      - Arn

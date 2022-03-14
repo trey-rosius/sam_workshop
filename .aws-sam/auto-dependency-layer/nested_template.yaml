@@ -1,0 +1,22 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS SAM CLI Nested Stack for Auto Dependency Layer Creation
+Metadata:
+  SamCliInfo: 1.40.1
+  key: AWS SAM CLI sync command
+Outputs:
+  SamWorkshopFunctionb29b27e6DepLayer:
+    Value:
+      Ref: SamWorkshopFunctionb29b27e6DepLayer
+Resources:
+  SamWorkshopFunctionb29b27e6DepLayer:
+    Metadata:
+      CreatedBy: AWS SAM CLI sync command
+    Properties:
+      CompatibleRuntimes:
+      - python3.8
+      ContentUri: /Users/rosius/Documents/sam_workshop/.aws-sam/auto-dependency-layer/SamWorkshopFunctionb29b27e6DepLayer
+      Description: Auto created layer for dependencies of function SamWorkshopFunction
+      LayerName: sam-workshop09b2387b-SamWorkshopFunctionb29b27e6-DepLayer
+      RetentionPolicy: Delete
+    Type: AWS::Serverless::LayerVersion
+Transform: AWS::Serverless-2016-10-31
